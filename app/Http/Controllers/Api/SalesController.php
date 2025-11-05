@@ -22,7 +22,7 @@ class SalesController extends Controller
         $validator = Validator::make($request->all(), [
             'sale' => 'required|array',
             'sale.document_id' => 'required|integer',
-            'sale.document_number' => 'required|string',
+            'sale.document_number' => 'nullable|string',
             'sale.date_created' => 'required|date',
             'sale.total' => 'required|numeric',
             'items' => 'required|array|min:1',
