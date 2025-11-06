@@ -34,6 +34,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('companies')->group(function () {
         Route::get('/', [CompanyController::class, 'index']);
         Route::post('/', [CompanyController::class, 'store']);
+        Route::post('/get-or-create', [CompanyController::class, 'getOrCreate']); // ✅ ADDED THIS
         Route::get('/{id}', [CompanyController::class, 'show']);
         Route::put('/{id}', [CompanyController::class, 'update']);
         Route::delete('/{id}', [CompanyController::class, 'destroy']);

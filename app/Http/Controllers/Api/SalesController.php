@@ -20,16 +20,32 @@ class SalesController extends Controller
     {
         // Validate the incoming request
         $validator = Validator::make($request->all(), [
-            'sale' => 'required|array',
-            'sale.document_id' => 'required|integer',
-            'sale.document_number' => 'nullable|string',
-            'sale.date_created' => 'required|date',
-            'sale.total' => 'required|numeric',
+            'document_id' => 'required|integer',
+            'document_number' => 'nullable|string',
+            'company_id' => 'required|exists:companies,id',  // Use existing company_id
+            'date_created' => 'required|date',
+            'total' => 'required|numeric',
+            'tax' => 'nullable|numeric',
+            'discount' => 'nullable|numeric',
+            'customer_id' => 'nullable|integer',
+            'user_id' => 'nullable|integer',
+            'status' => 'nullable|string',
+            'fiscal_signature' => 'nullable|string',
+            'qr_code' => 'nullable|string',
+            'fiscal_invoice_number' => 'nullable|string',
+            'fiscalized_at' => 'nullable|date',
+            'tax_details' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|integer',
+            'items.*.product_name' => 'required|string',
             'items.*.quantity' => 'required|numeric',
             'items.*.price' => 'required|numeric',
-            'company' => 'required|array',
+            'items.*.discount' => 'nullable|numeric',
+            'items.*.tax' => 'nullable|numeric',
+            'items.*.total' => 'required|numeric',
+            'items.*.tax_id' => 'nullable|integer',
+            'items.*.tax_code' => 'nullable|string',
+            'items.*.tax_percent' => 'nullable|numeric',
         ]);
 
         if ($validator->fails()) {
@@ -43,44 +59,42 @@ class SalesController extends Controller
         try {
             DB::beginTransaction();
 
-            $saleData = $request->input('sale');
-            $itemsData = $request->input('items');
-            $companyData = $request->input('company');
-            $fiscalData = $request->input('fiscal_data');
+            // Check if sale already exists
+            $existingSale = Sale::where('document_id', $request->document_id)->first();
+            if ($existingSale) {
+                DB::commit();
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Sale already exists',
+                    'data' => [
+                        'sale_id' => $existingSale->id,
+                        'document_id' => $existingSale->document_id,
+                        'document_number' => $existingSale->document_number,
+                    ],
+                ], 200);
+            }
 
-            // Store or update company
-            $company = Company::updateOrCreate(
-                ['tax_id' => $companyData['tax_id']],
-                [
-                    'name' => $companyData['name'],
-                    'address' => $companyData['address'] ?? null,
-                    'phone' => $companyData['phone'] ?? null,
-                    'email' => $companyData['email'] ?? null,
-                    'vat_number' => $companyData['vat_number'] ?? null,
-                ]
-            );
-
-            // Create the sale
+            // Create the sale - using the company_id from request
             $sale = Sale::create([
-                'document_id' => $saleData['document_id'],
-                'document_number' => $saleData['document_number'],
-                'company_id' => $company->id,
-                'date_created' => $saleData['date_created'],
-                'total' => $saleData['total'],
-                'tax' => $saleData['tax'] ?? 0,
-                'discount' => $saleData['discount'] ?? 0,
-                'customer_id' => $saleData['customer_id'] ?? null,
-                'user_id' => $saleData['user_id'] ?? null,
-                'status' => $saleData['status'] ?? 'pending',
-                'fiscal_signature' => $fiscalData['fiscal_signature'] ?? null,
-                'qr_code' => $fiscalData['qr_code'] ?? null,
-                'fiscal_invoice_number' => $fiscalData['fiscal_invoice_number'] ?? null,
-                'fiscalized_at' => $fiscalData ? now() : null,
-                'tax_details' => $fiscalData['tax_details'] ?? null,
+                'document_id' => $request->document_id,
+                'document_number' => $request->document_number,
+                'company_id' => $request->company_id,  // Use the provided company_id
+                'date_created' => $request->date_created,
+                'total' => $request->total,
+                'tax' => $request->tax ?? 0,
+                'discount' => $request->discount ?? 0,
+                'customer_id' => $request->customer_id,
+                'user_id' => $request->user_id,
+                'status' => $request->status ?? 'pending',
+                'fiscal_signature' => $request->fiscal_signature,
+                'qr_code' => $request->qr_code,
+                'fiscal_invoice_number' => $request->fiscal_invoice_number,
+                'fiscalized_at' => $request->fiscalized_at ?? ($request->fiscal_signature ? now() : null),
+                'tax_details' => $request->tax_details,
             ]);
 
             // Create sale items
-            foreach ($itemsData as $itemData) {
+            foreach ($request->items as $itemData) {
                 SaleItem::create([
                     'sale_id' => $sale->id,
                     'product_id' => $itemData['product_id'],
@@ -101,6 +115,7 @@ class SalesController extends Controller
             Log::info('Sale stored successfully', [
                 'sale_id' => $sale->id,
                 'document_id' => $sale->document_id,
+                'company_id' => $sale->company_id,
             ]);
 
             return response()->json([
@@ -129,76 +144,15 @@ class SalesController extends Controller
     }
 
     /**
-     * Store batch sales
-     */
-    public function storeBatch(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'sales' => 'required|array|min:1',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        try {
-            $salesData = $request->input('sales');
-            $results = [];
-            $successCount = 0;
-            $failureCount = 0;
-
-            foreach ($salesData as $saleData) {
-                try {
-                    // Create a new request for each sale
-                    $saleRequest = new Request($saleData);
-                    $result = $this->store($saleRequest);
-                    
-                    $results[] = [
-                        'document_id' => $saleData['sale']['document_id'],
-                        'success' => true,
-                    ];
-                    $successCount++;
-                } catch (\Exception $e) {
-                    $results[] = [
-                        'document_id' => $saleData['sale']['document_id'],
-                        'success' => false,
-                        'error' => $e->getMessage(),
-                    ];
-                    $failureCount++;
-                }
-            }
-
-            return response()->json([
-                'success' => $failureCount === 0,
-                'message' => "Processed {$successCount} of " . count($salesData) . " sales",
-                'success_count' => $successCount,
-                'failure_count' => $failureCount,
-                'results' => $results,
-            ], 200);
-
-        } catch (\Exception $e) {
-            Log::error('Failed to store batch sales', [
-                'error' => $e->getMessage(),
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to store batch sales: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
      * Update fiscal data for a sale
      */
     public function updateFiscalData(Request $request, $id)
     {
         $validator = Validator::make($request->all(), [
-            'fiscal_data' => 'required|array',
+            'fiscal_signature' => 'nullable|string',
+            'qr_code' => 'nullable|string',
+            'fiscal_invoice_number' => 'nullable|string',
+            'tax_details' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -211,15 +165,14 @@ class SalesController extends Controller
 
         try {
             $sale = Sale::where('document_id', $id)->firstOrFail();
-            $fiscalData = $request->input('fiscal_data');
 
             $sale->update([
-                'fiscal_signature' => $fiscalData['fiscal_signature'] ?? null,
-                'qr_code' => $fiscalData['qr_code'] ?? null,
-                'fiscal_invoice_number' => $fiscalData['fiscal_invoice_number'] ?? null,
+                'fiscal_signature' => $request->fiscal_signature ?? $sale->fiscal_signature,
+                'qr_code' => $request->qr_code ?? $sale->qr_code,
+                'fiscal_invoice_number' => $request->fiscal_invoice_number ?? $sale->fiscal_invoice_number,
                 'fiscalized_at' => now(),
-                'tax_details' => $fiscalData['tax_details'] ?? null,
-                'status' => isset($fiscalData['fiscal_signature']) ? 'fiscalized' : 'error',
+                'tax_details' => $request->tax_details ?? $sale->tax_details,
+                'status' => $request->fiscal_signature ? 'fiscalized' : 'error',
             ]);
 
             return response()->json([
@@ -247,10 +200,25 @@ class SalesController extends Controller
     public function index(Request $request)
     {
         try {
+            $query = Sale::with(['company', 'items']);
+
+            // Filter by company
+            if ($request->has('company_id')) {
+                $query->where('company_id', $request->company_id);
+            }
+
+            // Filter by status
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            // Filter by date range
+            if ($request->has('from') && $request->has('to')) {
+                $query->whereBetween('date_created', [$request->from, $request->to]);
+            }
+
             $perPage = $request->input('per_page', 15);
-            $sales = Sale::with(['company', 'items'])
-                ->orderBy('date_created', 'desc')
-                ->paginate($perPage);
+            $sales = $query->orderBy('date_created', 'desc')->paginate($perPage);
 
             return response()->json([
                 'success' => true,
@@ -314,105 +282,112 @@ class SalesController extends Controller
     }
 
     /**
-     * Get unfiscalized sales
+     * Store batch sales
      */
-    public function getUnfiscalized()
+    public function storeBatch(Request $request)
     {
+        $validator = Validator::make($request->all(), [
+            'sales' => 'required|array|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
         try {
-            $sales = Sale::with(['company', 'items'])
-                ->where('status', 'pending')
-                ->orWhere('status', 'error')
-                ->orderBy('date_created', 'desc')
-                ->get();
+            $salesData = $request->input('sales');
+            $results = [];
+            $successCount = 0;
+            $failureCount = 0;
+
+            foreach ($salesData as $saleData) {
+                try {
+                    // Create a new request for each sale
+                    $saleRequest = new Request($saleData);
+                    $result = $this->store($saleRequest);
+                    
+                    $responseData = $result->getData();
+                    $results[] = [
+                        'document_id' => $saleData['document_id'],
+                        'success' => $responseData->success ?? false,
+                    ];
+                    
+                    if ($responseData->success ?? false) {
+                        $successCount++;
+                    } else {
+                        $failureCount++;
+                    }
+                } catch (\Exception $e) {
+                    $results[] = [
+                        'document_id' => $saleData['document_id'] ?? 'unknown',
+                        'success' => false,
+                        'error' => $e->getMessage(),
+                    ];
+                    $failureCount++;
+                }
+            }
 
             return response()->json([
-                'success' => true,
-                'data' => $sales,
-                'count' => $sales->count(),
+                'success' => $failureCount === 0,
+                'message' => "Processed {$successCount} of " . count($salesData) . " sales",
+                'success_count' => $successCount,
+                'failure_count' => $failureCount,
+                'results' => $results,
             ], 200);
 
         } catch (\Exception $e) {
+            Log::error('Failed to store batch sales', [
+                'error' => $e->getMessage(),
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch unfiscalized sales: ' . $e->getMessage(),
+                'message' => 'Failed to store batch sales: ' . $e->getMessage(),
             ], 500);
         }
     }
 
     /**
-     * Get fiscalized sales
+     * Get sales statistics
      */
-    public function getFiscalized()
+    public function statistics(Request $request)
     {
         try {
-            $sales = Sale::with(['company', 'items'])
-                ->where('status', 'fiscalized')
-                ->whereNotNull('fiscal_signature')
-                ->orderBy('fiscalized_at', 'desc')
-                ->get();
+            $query = Sale::query();
 
-            return response()->json([
-                'success' => true,
-                'data' => $sales,
-                'count' => $sales->count(),
-            ], 200);
+            // Filter by company
+            if ($request->has('company_id')) {
+                $query->where('company_id', $request->company_id);
+            }
 
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch fiscalized sales: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
+            // Filter by date range
+            if ($request->has('from') && $request->has('to')) {
+                $query->whereBetween('date_created', [$request->from, $request->to]);
+            }
 
-    /**
-     * Get sales summary
-     */
-    public function getSummary()
-    {
-        try {
-            $summary = [
-                'total_sales' => Sale::count(),
-                'fiscalized_sales' => Sale::where('status', 'fiscalized')->count(),
-                'pending_sales' => Sale::where('status', 'pending')->count(),
-                'error_sales' => Sale::where('status', 'error')->count(),
-                'total_revenue' => Sale::sum('total'),
-                'fiscalized_revenue' => Sale::where('status', 'fiscalized')->sum('total'),
-                'today_sales' => Sale::whereDate('date_created', today())->count(),
-                'today_revenue' => Sale::whereDate('date_created', today())->sum('total'),
+            $stats = [
+                'total_sales' => $query->count(),
+                'total_revenue' => $query->sum('total'),
+                'total_tax' => $query->sum('tax'),
+                'total_discount' => $query->sum('discount'),
+                'fiscalized_sales' => (clone $query)->where('status', 'fiscalized')->count(),
+                'pending_sales' => (clone $query)->where('status', 'pending')->count(),
+                'error_sales' => (clone $query)->where('status', 'error')->count(),
             ];
 
             return response()->json([
                 'success' => true,
-                'data' => $summary,
+                'data' => $stats,
             ], 200);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch summary: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
-     * Delete a sale
-     */
-    public function destroy($id)
-    {
-        try {
-            $sale = Sale::where('document_id', $id)->firstOrFail();
-            $sale->delete();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Sale deleted successfully',
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to delete sale: ' . $e->getMessage(),
+                'message' => 'Failed to get statistics: ' . $e->getMessage(),
             ], 500);
         }
     }
