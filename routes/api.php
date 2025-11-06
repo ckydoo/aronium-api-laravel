@@ -2,66 +2,96 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\CompanyController;
 use App\Http\Controllers\Api\SalesController;
+use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\StockController;
+use App\Http\Controllers\Api\PurchaseController;
+use App\Http\Controllers\Api\ZReportController;
 
 /*
 |--------------------------------------------------------------------------
-| API Routes for Fiscalisation Integration
+| API Routes
 |--------------------------------------------------------------------------
-|
-| These routes handle incoming sales data from the Flutter fiscalisation app
-|
 */
 
-// Health check endpoint
+Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
+    return $request->user();
+});
+
+// Public health check
 Route::get('/health', function () {
     return response()->json([
         'status' => 'ok',
-        'message' => 'API is running',
-        'timestamp' => now()->toIso8601String(),
+        'timestamp' => now()->toIso8601String()
     ]);
 });
 
-// Protected API routes (require authentication)
+// Protected routes (require authentication)
 Route::middleware('auth:sanctum')->group(function () {
     
-    // Sales endpoints
-    Route::prefix('sales')->group(function () {
-        
-        // Store single sale
-        Route::post('/', [SalesController::class, 'store']);
-        
-        // Store batch sales
-        Route::post('/batch', [SalesController::class, 'storeBatch']);
-        
-        // Update fiscal data for a sale
-        Route::put('/{id}/fiscal', [SalesController::class, 'updateFiscalData']);
-        
-        // Get all sales
-        Route::get('/', [SalesController::class, 'index']);
-        
-        // Get single sale
-        Route::get('/{id}', [SalesController::class, 'show']);
-        
-        // Get sales by date range
-        Route::get('/range/{from}/{to}', [SalesController::class, 'getByDateRange']);
-        
-        // Get unfiscalized sales
-        Route::get('/status/unfiscalized', [SalesController::class, 'getUnfiscalized']);
-        
-        // Get fiscalized sales
-        Route::get('/status/fiscalized', [SalesController::class, 'getFiscalized']);
-        
-        // Delete a sale
-        Route::delete('/{id}', [SalesController::class, 'destroy']);
+    // Companies
+    Route::prefix('companies')->group(function () {
+        Route::get('/', [CompanyController::class, 'index']);
+        Route::post('/', [CompanyController::class, 'store']);
+        Route::get('/{id}', [CompanyController::class, 'show']);
+        Route::put('/{id}', [CompanyController::class, 'update']);
+        Route::delete('/{id}', [CompanyController::class, 'destroy']);
     });
-    
-});
 
-// Public routes (no authentication required)
-Route::prefix('public')->group(function () {
-    
-    // Get sales summary
-    Route::get('/sales/summary', [SalesController::class, 'getSummary']);
-    
+    // Sales
+    Route::prefix('sales')->group(function () {
+        Route::get('/', [SalesController::class, 'index']);
+        Route::post('/', [SalesController::class, 'store']);
+        Route::post('/sync-batch', [SalesController::class, 'syncBatch']);
+        Route::get('/{id}', [SalesController::class, 'show']);
+        Route::put('/{id}', [SalesController::class, 'update']);
+        Route::delete('/{id}', [SalesController::class, 'destroy']);
+        
+        // Sales statistics
+        Route::get('/stats/summary', [SalesController::class, 'summary']);
+        Route::get('/stats/by-date', [SalesController::class, 'byDate']);
+    });
+
+    // Products
+    Route::prefix('products')->group(function () {
+        Route::get('/', [ProductController::class, 'index']);
+        Route::post('/', [ProductController::class, 'store']);
+        Route::post('/sync-batch', [ProductController::class, 'syncBatch']);
+        Route::get('/{id}', [ProductController::class, 'show']);
+        Route::put('/{id}', [ProductController::class, 'update']);
+        Route::delete('/{id}', [ProductController::class, 'destroy']);
+    });
+
+    // Stock/Inventory
+    Route::prefix('stocks')->group(function () {
+        Route::get('/', [StockController::class, 'index']);
+        Route::get('/low-stock', [StockController::class, 'lowStock']);
+        Route::put('/{id}', [StockController::class, 'update']);
+        Route::post('/sync-batch', [StockController::class, 'syncBatch']);
+        Route::post('/products/{productId}/adjust', [StockController::class, 'adjust']);
+        Route::get('/products/{productId}/movements', [StockController::class, 'movements']);
+    });
+
+    // Purchases
+    Route::prefix('purchases')->group(function () {
+        Route::get('/', [PurchaseController::class, 'index']);
+        Route::post('/', [PurchaseController::class, 'store']);
+        Route::post('/sync-batch', [PurchaseController::class, 'syncBatch']);
+        Route::get('/{id}', [PurchaseController::class, 'show']);
+        Route::put('/{id}', [PurchaseController::class, 'update']);
+        Route::delete('/{id}', [PurchaseController::class, 'destroy']);
+    });
+
+    // Z-Reports
+    Route::prefix('z-reports')->group(function () {
+        Route::get('/', [ZReportController::class, 'index']);
+        Route::post('/', [ZReportController::class, 'store']);
+        Route::post('/generate', [ZReportController::class, 'generate']);
+        Route::post('/sync-batch', [ZReportController::class, 'syncBatch']);
+        Route::get('/summary', [ZReportController::class, 'summary']);
+        Route::get('/{id}', [ZReportController::class, 'show']);
+        Route::put('/{id}', [ZReportController::class, 'update']);
+        Route::delete('/{id}', [ZReportController::class, 'destroy']);
+    });
 });
