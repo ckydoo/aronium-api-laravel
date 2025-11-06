@@ -75,7 +75,7 @@ class SalesController extends Controller
             }
 
             // Create the sale - using the company_id from request
-            $sale = Sale::create([
+            $sale = Sale::updateOrCreate([
                 'document_id' => $request->document_id,
                 'document_number' => $request->document_number,
                 'company_id' => $request->company_id,  // Use the provided company_id
@@ -95,7 +95,7 @@ class SalesController extends Controller
 
             // Create sale items
             foreach ($request->items as $itemData) {
-                SaleItem::create([
+                SaleItem::updateOrCreate([
                     'sale_id' => $sale->id,
                     'product_id' => $itemData['product_id'],
                     'product_name' => $itemData['product_name'],

@@ -15,6 +15,26 @@
                     <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
                         {{ __('Dashboard') }}
                     </x-nav-link>
+                    
+                    <x-nav-link :href="route('dashboard.sales')" :active="request()->routeIs('dashboard.sales')">
+                        {{ __('Sales') }}
+                    </x-nav-link>
+                    
+                    <x-nav-link :href="route('dashboard.products')" :active="request()->routeIs('dashboard.products')">
+                        {{ __('Products') }}
+                    </x-nav-link>
+                    
+                    <x-nav-link :href="route('dashboard.inventory')" :active="request()->routeIs('dashboard.inventory')">
+                        {{ __('Inventory') }}
+                    </x-nav-link>
+                    
+                    <x-nav-link :href="route('dashboard.purchases')" :active="request()->routeIs('dashboard.purchases')">
+                        {{ __('Purchases') }}
+                    </x-nav-link>
+                    
+                    <x-nav-link :href="route('dashboard.z-reports')" :active="request()->routeIs('dashboard.z-reports')">
+                        {{ __('Z-Reports') }}
+                    </x-nav-link>
                 </div>
             </div>
 
@@ -45,7 +65,7 @@
                             <x-dropdown-link :href="route('logout')"
                                     onclick="event.preventDefault();
                                                 this.closest('form').submit();">
-                                {{ __('Log Out') }}
+                                {{ __('Log out') }}
                             </x-dropdown-link>
                         </form>
                     </x-slot>
@@ -69,6 +89,26 @@
         <div class="pt-2 pb-3 space-y-1">
             <x-responsive-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
                 {{ __('Dashboard') }}
+            </x-responsive-nav-link>
+            
+            <x-responsive-nav-link :href="route('dashboard.sales')" :active="request()->routeIs('dashboard.sales')">
+                {{ __('Sales') }}
+            </x-responsive-nav-link>
+            
+            <x-responsive-nav-link :href="route('dashboard.products')" :active="request()->routeIs('dashboard.products')">
+                {{ __('Products') }}
+            </x-responsive-nav-link>
+            
+            <x-responsive-nav-link :href="route('dashboard.inventory')" :active="request()->routeIs('dashboard.inventory')">
+                {{ __('Inventory') }}
+            </x-responsive-nav-link>
+            
+            <x-responsive-nav-link :href="route('dashboard.purchases')" :active="request()->routeIs('dashboard.purchases')">
+                {{ __('Purchases') }}
+            </x-responsive-nav-link>
+            
+            <x-responsive-nav-link :href="route('dashboard.z-reports')" :active="request()->routeIs('dashboard.z-reports')">
+                {{ __('Z-Reports') }}
             </x-responsive-nav-link>
         </div>
 
