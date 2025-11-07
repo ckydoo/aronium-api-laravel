@@ -177,18 +177,23 @@ class ProductController extends Controller
                     $productData
                 );
 
-                // Ensure stock record exists
-                if ($product->track_inventory && !$product->stock) {
-                    $product->stock()->create([
+                if ($product->track_inventory) {
+                    $stockData = [
                         'company_id' => $product->company_id,
-                        'quantity' => 0,
-                        'available_quantity' => 0,
+                        'quantity' => $productData['stock_quantity'] ?? 0,
+                        'available_quantity' => $productData['stock_quantity'] ?? 0,
                         'reserved_quantity' => 0,
-                    ]);
+                    ];
+
+                    if ($product->stock) {
+                        $product->stock->update($stockData);
+                    } else {
+                        $product->stock()->create($stockData);
+                    }
                 }
 
                 $synced[] = $product->aronium_product_id;
-            } catch (\Exception $e) {
+            }catch (\Exception $e) {
                 $errors[] = [
                     'aronium_product_id' => $productData['aronium_product_id'],
                     'error' => $e->getMessage()

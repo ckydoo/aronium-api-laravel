@@ -110,7 +110,7 @@ class StockController extends Controller
 
             $quantityBefore = $stock->quantity;
             $stock->adjustQuantity($request->quantity, $request->movement_type);
-            
+
             // Create stock movement record
             StockMovement::create([
                 'product_id' => $product->id,
