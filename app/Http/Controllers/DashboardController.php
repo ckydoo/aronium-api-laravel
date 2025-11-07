@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Company;
 use App\Models\Sale;
 use App\Models\Product;
 use App\Models\Stock;
 use App\Models\Purchase;
+use App\Models\Company;
 use App\Models\ZReport;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,99 +15,145 @@ use Carbon\Carbon;
 class DashboardController extends Controller
 {
     /**
-     * Display the main dashboard
+     * Display the dashboard with business statistics
      */
     public function index(Request $request)
     {
-        $user = auth()->user();
+        // Get date filter from request or default to today
+        $dateFilter = $request->input('date_filter', 'today');
+        $customFrom = $request->input('from_date');
+        $customTo = $request->input('to_date');
 
-        // Get user's company
-        if (!$user->company_id) {
-            return redirect()->route('profile.edit')
-                ->with('warning', 'Please select a company to view your dashboard.');
-        }
+        // Calculate date range based on filter
+        $dateRange = $this->getDateRange($dateFilter, $customFrom, $customTo);
+        $fromDate = $dateRange['from'];
+        $toDate = $dateRange['to'];
 
-        $company = Company::findOrFail($user->company_id);
+        // Get sales statistics
+        $salesData = $this->getSalesStatistics($fromDate, $toDate);
 
-        // Date range filter (default to last 30 days)
-        $startDate = $request->get('start_date', now()->subDays(30)->format('Y-m-d'));
-        $endDate = $request->get('end_date', now()->format('Y-m-d'));
+        // Get inventory statistics
+        $inventoryData = $this->getInventoryStatistics();
 
-        // Get dashboard statistics
-        $stats = $this->getDashboardStats($company->id, $startDate, $endDate);
+        // Get top selling products
+        $topProducts = $this->getTopSellingProducts($fromDate, $toDate);
 
         // Get recent sales
-        $recentSales = Sale::where('company_id', $company->id)
-            ->with('items')
-            ->latest('date_created')
+        $recentSales = Sale::with(['company', 'items'])
+            ->whereBetween('date_created', [$fromDate, $toDate])
+            ->orderBy('date_created', 'desc')
             ->limit(10)
             ->get();
 
-        // Get low stock items
-        $lowStockItems = Stock::where('company_id', $company->id)
-            ->with('product')
-            ->whereColumn('available_quantity', '<=', 'reorder_level')
-            ->whereNotNull('reorder_level')
-            ->orderBy('available_quantity', 'asc')
-            ->limit(10)
-            ->get();
+        // Get sales trend (last 7 days)
+        $salesTrend = $this->getSalesTrend();
 
-        // Get sales chart data (last 30 days)
-        $salesChartData = $this->getSalesChartData($company->id, $startDate, $endDate);
+        // Get company information
+        $company = Company::first();
 
         return view('dashboard', compact(
-            'company',
-            'stats',
+            'salesData',
+            'inventoryData',
+            'topProducts',
             'recentSales',
-            'lowStockItems',
-            'salesChartData',
-            'startDate',
-            'endDate'
+            'salesTrend',
+            'company',
+            'dateFilter',
+            'fromDate',
+            'toDate'
         ));
     }
 
     /**
-     * Get dashboard statistics
+     * Get date range based on filter
      */
-    private function getDashboardStats($companyId, $startDate, $endDate)
+    private function getDateRange($filter, $customFrom = null, $customTo = null)
     {
-        $sales = Sale::where('company_id', $companyId)
-            ->whereBetween('date_created', [$startDate, $endDate]);
+        $now = Carbon::now();
 
-        $totalRevenue = $sales->sum('total');
+        switch ($filter) {
+            case 'today':
+                return [
+                    'from' => $now->copy()->startOfDay(),
+                    'to' => $now->copy()->endOfDay()
+                ];
+
+            case 'yesterday':
+                return [
+                    'from' => $now->copy()->subDay()->startOfDay(),
+                    'to' => $now->copy()->subDay()->endOfDay()
+                ];
+
+            case 'week':
+                return [
+                    'from' => $now->copy()->startOfWeek(),
+                    'to' => $now->copy()->endOfWeek()
+                ];
+
+            case 'month':
+                return [
+                    'from' => $now->copy()->startOfMonth(),
+                    'to' => $now->copy()->endOfMonth()
+                ];
+
+            case 'year':
+                return [
+                    'from' => $now->copy()->startOfYear(),
+                    'to' => $now->copy()->endOfYear()
+                ];
+
+            case 'custom':
+                return [
+                    'from' => $customFrom ? Carbon::parse($customFrom)->startOfDay() : $now->copy()->startOfMonth(),
+                    'to' => $customTo ? Carbon::parse($customTo)->endOfDay() : $now->copy()->endOfDay()
+                ];
+
+            default:
+                return [
+                    'from' => $now->copy()->startOfDay(),
+                    'to' => $now->copy()->endOfDay()
+                ];
+        }
+    }
+
+    /**
+     * Get sales statistics
+     */
+    private function getSalesStatistics($fromDate, $toDate)
+    {
+        $sales = Sale::whereBetween('date_created', [$fromDate, $toDate]);
+
         $totalSales = $sales->count();
-        $fiscalizedSales = $sales->where('status', 'fiscalized')->count();
-        $pendingSales = $sales->where('status', 'pending')->count();
-
-        // Product stats
-        $totalProducts = Product::where('company_id', $companyId)
-            ->where('is_active', true)
+        $totalRevenue = $sales->sum('total');
+        $fiscalizedSales = Sale::whereBetween('date_created', [$fromDate, $toDate])
+            ->where('status', 'fiscalized')
+            ->count();
+        $pendingSales = Sale::whereBetween('date_created', [$fromDate, $toDate])
+            ->where('status', 'pending')
+            ->count();
+        $errorSales = Sale::whereBetween('date_created', [$fromDate, $toDate])
+            ->where('status', 'error')
             ->count();
 
-        $lowStockCount = Stock::where('company_id', $companyId)
-            ->whereColumn('available_quantity', '<=', 'reorder_level')
-            ->whereNotNull('reorder_level')
-            ->count();
-
-        $outOfStockCount = Stock::where('company_id', $companyId)
-            ->where('available_quantity', '<=', 0)
-            ->count();
-
-        // Purchase stats
-        $totalPurchases = Purchase::where('company_id', $companyId)
-            ->whereBetween('date_created', [$startDate, $endDate])
+        $fiscalizedRevenue = Sale::whereBetween('date_created', [$fromDate, $toDate])
+            ->where('status', 'fiscalized')
             ->sum('total');
 
-        // Average sale value
-        $avgSaleValue = $totalSales > 0 ? $totalRevenue / $totalSales : 0;
+        $totalTax = Sale::whereBetween('date_created', [$fromDate, $toDate])
+            ->sum('tax');
 
-        // Compare with previous period
-        $previousStartDate = Carbon::parse($startDate)->subDays(
-            Carbon::parse($endDate)->diffInDays($startDate)
-        )->format('Y-m-d');
+        $totalDiscount = Sale::whereBetween('date_created', [$fromDate, $toDate])
+            ->sum('discount');
 
-        $previousRevenue = Sale::where('company_id', $companyId)
-            ->whereBetween('date_created', [$previousStartDate, $startDate])
+        // Calculate average sale
+        $averageSale = $totalSales > 0 ? $totalRevenue / $totalSales : 0;
+
+        // Calculate previous period for comparison
+        $periodLength = $fromDate->diffInDays($toDate);
+        $previousFrom = $fromDate->copy()->subDays($periodLength + 1);
+        $previousTo = $fromDate->copy()->subDay();
+
+        $previousRevenue = Sale::whereBetween('date_created', [$previousFrom, $previousTo])
             ->sum('total');
 
         $revenueChange = $previousRevenue > 0
@@ -115,228 +161,301 @@ class DashboardController extends Controller
             : 0;
 
         return [
-            'total_revenue' => $totalRevenue,
             'total_sales' => $totalSales,
+            'total_revenue' => $totalRevenue,
             'fiscalized_sales' => $fiscalizedSales,
             'pending_sales' => $pendingSales,
-            'total_products' => $totalProducts,
-            'low_stock_count' => $lowStockCount,
-            'out_of_stock_count' => $outOfStockCount,
-            'total_purchases' => $totalPurchases,
-            'avg_sale_value' => $avgSaleValue,
+            'error_sales' => $errorSales,
+            'fiscalized_revenue' => $fiscalizedRevenue,
+            'total_tax' => $totalTax,
+            'total_discount' => $totalDiscount,
+            'average_sale' => $averageSale,
             'revenue_change' => $revenueChange,
+            'fiscalization_rate' => $totalSales > 0 ? ($fiscalizedSales / $totalSales) * 100 : 0,
         ];
     }
 
     /**
-     * Get sales chart data for visualization
+     * Get inventory statistics
+     * FIXED: Corrected the JOIN to use proper column names
      */
-    private function getSalesChartData($companyId, $startDate, $endDate)
+    private function getInventoryStatistics()
     {
-        $salesByDate = Sale::where('company_id', $companyId)
-            ->whereBetween('date_created', [$startDate, $endDate])
-            ->select(
-                DB::raw('DATE(date_created) as date'),
-                DB::raw('SUM(total) as total'),
-                DB::raw('COUNT(*) as count')
-            )
-            ->groupBy('date')
-            ->orderBy('date')
-            ->get();
+        $totalProducts = Product::count();
+
+        // FIXED: The stocks.product_id references products.id (not products.product_id)
+        // The products table has 'id' as primary key and 'aronium_product_id' as the Aronium reference
+        $totalStockValue = DB::table('stocks')
+            ->join('products', 'stocks.product_id', '=', 'products.id') // FIXED: Changed from products.product_id to products.id
+            ->sum(DB::raw('stocks.quantity * products.price'));
+
+        $lowStockProducts = Stock::whereColumn('quantity', '<=', 'reorder_level')
+            ->whereNotNull('reorder_level')
+            ->count();
+
+        $outOfStockProducts = Stock::where('quantity', 0)->count();
 
         return [
-            'labels' => $salesByDate->pluck('date')->map(fn($date) =>
-                Carbon::parse($date)->format('M d')
-            )->toArray(),
-            'revenue' => $salesByDate->pluck('total')->toArray(),
-            'count' => $salesByDate->pluck('count')->toArray(),
+            'total_products' => $totalProducts,
+            'total_stock_value' => $totalStockValue ?? 0,
+            'low_stock_products' => $lowStockProducts,
+            'out_of_stock_products' => $outOfStockProducts,
         ];
     }
 
     /**
-     * Sales listing page
+     * Get top selling products
+     * FIXED: Uses aronium_product_id for the join
+     */
+    private function getTopSellingProducts($fromDate, $toDate, $limit = 5)
+    {
+        // The sale_items.product_id contains the aronium_product_id
+        // So we join with products.aronium_product_id
+        return DB::table('sale_items')
+            ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+            ->join('products', 'sale_items.product_id', '=', 'products.aronium_product_id') // FIXED: Join on aronium_product_id
+            ->whereBetween('sales.date_created', [$fromDate, $toDate])
+            ->select(
+                'products.name as product_name', // FIXED: Changed from product_name to name
+                DB::raw('SUM(sale_items.quantity) as total_quantity'),
+                DB::raw('SUM(sale_items.total) as total_revenue')
+            )
+            ->groupBy('products.id', 'products.name') // FIXED: Group by products.id instead of product_id
+            ->orderBy('total_quantity', 'desc')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Get sales trend for the last 7 days
+     */
+    private function getSalesTrend()
+    {
+        $trend = [];
+
+        for ($i = 6; $i >= 0; $i--) {
+            $date = Carbon::now()->subDays($i);
+            $sales = Sale::whereDate('date_created', $date)->sum('total');
+
+            $trend[] = [
+                'date' => $date->format('M d'),
+                'sales' => $sales,
+            ];
+        }
+
+        return $trend;
+    }
+
+    /**
+     * Display sales list page
      */
     public function sales(Request $request)
     {
-        $user = auth()->user();
-        $company = Company::findOrFail($user->company_id);
+        $query = Sale::with(['company', 'items']);
 
-        $query = Sale::where('company_id', $company->id)
-            ->with('items');
+        // Search filter
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('document_number', 'like', "%{$search}%")
+                  ->orWhere('fiscal_invoice_number', 'like', "%{$search}%");
+            });
+        }
 
-        // Filters
-        if ($request->filled('status')) {
+        // Status filter
+        if ($request->has('status') && $request->status != 'all') {
             $query->where('status', $request->status);
         }
 
-        if ($request->filled('start_date') && $request->filled('end_date')) {
+        // Date filter
+        if ($request->has('from_date') && $request->has('to_date')) {
             $query->whereBetween('date_created', [
-                $request->start_date,
-                $request->end_date
+                Carbon::parse($request->from_date)->startOfDay(),
+                Carbon::parse($request->to_date)->endOfDay()
             ]);
         }
 
-        if ($request->filled('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('document_number', 'like', "%{$request->search}%")
-                  ->orWhere('fiscal_invoice_number', 'like', "%{$request->search}%");
-            });
-        }
+        $sales = $query->orderBy('date_created', 'desc')->paginate(20);
 
-        $sales = $query->latest('date_created')->paginate(20);
-
-        return view('dashboard.sales', compact('company', 'sales'));
+        return view('sales.index', compact('sales'));
     }
 
     /**
-     * Products listing page
+     * Display products list page
      */
     public function products(Request $request)
     {
-        $user = auth()->user();
-        $company = Company::findOrFail($user->company_id);
+        $query = Product::with(['stock', 'company']);
 
-        $query = Product::where('company_id', $company->id)
-            ->with('stock');
+        // Search filter
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('code', 'like', "%{$search}%")
+                  ->orWhere('barcode', 'like', "%{$search}%");
+            });
+        }
 
-        // Filters
-        if ($request->filled('is_active')) {
+        // Active filter
+        if ($request->has('is_active') && $request->is_active != 'all') {
             $query->where('is_active', $request->boolean('is_active'));
         }
 
-        if ($request->filled('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('name', 'like', "%{$request->search}%")
-                  ->orWhere('code', 'like', "%{$request->search}%")
-                  ->orWhere('barcode', 'like', "%{$request->search}%");
-            });
+        // Category filter
+        if ($request->has('category') && $request->category != 'all') {
+            $query->where('category_name', $request->category);
         }
 
         $products = $query->orderBy('name')->paginate(20);
 
-        return view('dashboard.products', compact('company', 'products'));
+        // Get categories for filter
+        $categories = Product::select('category_name')
+            ->distinct()
+            ->whereNotNull('category_name')
+            ->orderBy('category_name')
+            ->pluck('category_name');
+
+        return view('products.index', compact('products', 'categories'));
     }
 
     /**
-     * Stock/Inventory listing page
+     * Display inventory/stock list page
      */
-    public function stock(Request $request)
-    {
-        $user = auth()->user();
-        $company = Company::findOrFail($user->company_id);
-
-        $query = Stock::where('company_id', $company->id)
-            ->with('product');
-
-        // Filters
-        if ($request->boolean('low_stock')) {
-            $query->whereColumn('available_quantity', '<=', 'reorder_level')
-                  ->whereNotNull('reorder_level');
-        }
-
-        if ($request->boolean('out_of_stock')) {
-            $query->where('available_quantity', '<=', 0);
-        }
-
-        if ($request->filled('search')) {
-            $query->whereHas('product', function($q) use ($request) {
-                $q->where('name', 'like', "%{$request->search}%")
-                  ->orWhere('code', 'like', "%{$request->search}%");
-            });
-        }
-
-        $stocks = $query->paginate(20);
-
-        return view('dashboard.stock', compact('company', 'stocks'));
-    }
     public function inventory(Request $request)
     {
-        $user = auth()->user();
-        $company = Company::findOrFail($user->company_id);
+        $query = Stock::with(['product', 'company']);
 
-        $query = Stock::where('company_id', $company->id)
-            ->with('product');
-
-        // Filters
-        if ($request->boolean('low_stock')) {
-            $query->whereColumn('available_quantity', '<=', 'reorder_level')
-                  ->whereNotNull('reorder_level');
-        }
-
-        if ($request->boolean('out_of_stock')) {
-            $query->where('available_quantity', '<=', 0);
-        }
-
-        if ($request->filled('search')) {
-            $query->whereHas('product', function($q) use ($request) {
-                $q->where('name', 'like', "%{$request->search}%")
-                  ->orWhere('code', 'like', "%{$request->search}%");
+        // Search filter
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->whereHas('product', function($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('code', 'like', "%{$search}%");
             });
         }
 
-        $stocks = $query->paginate(20);
+        // Stock level filter
+        if ($request->has('stock_level')) {
+            switch ($request->stock_level) {
+                case 'out_of_stock':
+                    $query->where('quantity', 0);
+                    break;
+                case 'low_stock':
+                    $query->whereColumn('quantity', '<=', 'reorder_level')
+                          ->where('quantity', '>', 0);
+                    break;
+                case 'in_stock':
+                    $query->where('quantity', '>', 0)
+                          ->where(function($q) {
+                              $q->whereColumn('quantity', '>', 'reorder_level')
+                                ->orWhereNull('reorder_level');
+                          });
+                    break;
+            }
+        }
 
-        return view('dashboard.stock', compact('company', 'stocks'));
+        $stocks = $query->orderBy('quantity', 'asc')->paginate(20);
+
+        // Get summary stats
+        $stats = [
+            'total_items' => Stock::count(),
+            'out_of_stock' => Stock::where('quantity', 0)->count(),
+            'low_stock' => Stock::whereColumn('quantity', '<=', 'reorder_level')
+                ->whereNotNull('reorder_level')
+                ->where('quantity', '>', 0)
+                ->count(),
+            'total_value' => DB::table('stocks')
+                ->join('products', 'stocks.product_id', '=', 'products.id')
+                ->sum(DB::raw('stocks.quantity * products.price'))
+        ];
+
+        return view('inventory.index', compact('stocks', 'stats'));
     }
+
     /**
-     * Purchases listing page
+     * Display purchases list page
      */
     public function purchases(Request $request)
     {
-        $user = auth()->user();
-        $company = Company::findOrFail($user->company_id);
+        $query = Purchase::with(['company', 'items']);
 
-        $query = Purchase::where('company_id', $company->id)
-            ->with('items');
-
-        // Filters
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->filled('start_date') && $request->filled('end_date')) {
-            $query->whereBetween('date_created', [
-                $request->start_date,
-                $request->end_date
-            ]);
-        }
-
-        if ($request->filled('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('document_number', 'like', "%{$request->search}%")
-                  ->orWhere('supplier_name', 'like', "%{$request->search}%");
+        // Search filter
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('document_number', 'like', "%{$search}%")
+                  ->orWhere('supplier_name', 'like', "%{$search}%");
             });
         }
 
-        $purchases = $query->latest('date_created')->paginate(20);
+        // Status filter
+        if ($request->has('status') && $request->status != 'all') {
+            $query->where('status', $request->status);
+        }
 
-        return view('dashboard.purchases', compact('company', 'purchases'));
-    }
-
-    /**
-     * Z-Reports listing page
-     */
-    public function zReports(Request $request)
-    {
-        $user = auth()->user();
-        $company = Company::findOrFail($user->company_id);
-
-        $query = ZReport::where('company_id', $company->id);
-
-        // Filters
-        if ($request->filled('start_date') && $request->filled('end_date')) {
-            $query->whereBetween('report_date', [
-                $request->start_date,
-                $request->end_date
+        // Date filter
+        if ($request->has('from_date') && $request->has('to_date')) {
+            $query->whereBetween('date_created', [
+                Carbon::parse($request->from_date)->startOfDay(),
+                Carbon::parse($request->to_date)->endOfDay()
             ]);
         }
 
-        if ($request->filled('device_id')) {
+        $purchases = $query->orderBy('date_created', 'desc')->paginate(20);
+
+        // Get summary
+        $stats = [
+            'total_purchases' => Purchase::count(),
+            'total_amount' => Purchase::sum('total'),
+            'pending' => Purchase::where('status', 'pending')->count(),
+            'received' => Purchase::where('status', 'received')->count(),
+        ];
+
+        return view('purchases.index', compact('purchases', 'stats'));
+    }
+
+    /**
+     * Display Z-Reports list page
+     */
+    public function zreports(Request $request)
+    {
+        $query = ZReport::with('company');
+
+        // Date filter
+        if ($request->has('from_date') && $request->has('to_date')) {
+            $query->whereBetween('report_date', [
+                Carbon::parse($request->from_date)->startOfDay(),
+                Carbon::parse($request->to_date)->endOfDay()
+            ]);
+        } else {
+            // Default to last 30 days
+            $query->where('report_date', '>=', Carbon::now()->subDays(30));
+        }
+
+        // Device filter
+        if ($request->has('device_id') && $request->device_id != 'all') {
             $query->where('device_id', $request->device_id);
         }
 
-        $zReports = $query->latest('report_date')->paginate(20);
+        $reports = $query->orderBy('report_date', 'desc')->paginate(31);
 
-        return view('dashboard.z-reports', compact('company', 'zReports'));
+        // Get summary for the period
+        $summary = [
+            'total_reports' => $reports->total(),
+            'total_transactions' => $reports->sum('total_transactions'),
+            'gross_sales' => $reports->sum('gross_sales'),
+            'net_sales' => $reports->sum('net_sales'),
+            'total_tax' => $reports->sum('total_tax'),
+        ];
+
+        // Get unique devices for filter
+        $devices = ZReport::select('device_id')
+            ->distinct()
+            ->whereNotNull('device_id')
+            ->orderBy('device_id')
+            ->pluck('device_id');
+
+        return view('zreports.index', compact('reports', 'summary', 'devices'));
     }
 }
