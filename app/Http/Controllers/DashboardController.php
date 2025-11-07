@@ -20,7 +20,7 @@ class DashboardController extends Controller
     public function index(Request $request)
     {
         $user = auth()->user();
-        
+
         // Get user's company
         if (!$user->company_id) {
             return redirect()->route('profile.edit')
@@ -28,14 +28,14 @@ class DashboardController extends Controller
         }
 
         $company = Company::findOrFail($user->company_id);
-        
+
         // Date range filter (default to last 30 days)
         $startDate = $request->get('start_date', now()->subDays(30)->format('Y-m-d'));
         $endDate = $request->get('end_date', now()->format('Y-m-d'));
 
         // Get dashboard statistics
         $stats = $this->getDashboardStats($company->id, $startDate, $endDate);
-        
+
         // Get recent sales
         $recentSales = Sale::where('company_id', $company->id)
             ->with('items')
@@ -105,13 +105,13 @@ class DashboardController extends Controller
         $previousStartDate = Carbon::parse($startDate)->subDays(
             Carbon::parse($endDate)->diffInDays($startDate)
         )->format('Y-m-d');
-        
+
         $previousRevenue = Sale::where('company_id', $companyId)
             ->whereBetween('date_created', [$previousStartDate, $startDate])
             ->sum('total');
 
-        $revenueChange = $previousRevenue > 0 
-            ? (($totalRevenue - $previousRevenue) / $previousRevenue) * 100 
+        $revenueChange = $previousRevenue > 0
+            ? (($totalRevenue - $previousRevenue) / $previousRevenue) * 100
             : 0;
 
         return [
@@ -145,7 +145,7 @@ class DashboardController extends Controller
             ->get();
 
         return [
-            'labels' => $salesByDate->pluck('date')->map(fn($date) => 
+            'labels' => $salesByDate->pluck('date')->map(fn($date) =>
                 Carbon::parse($date)->format('M d')
             )->toArray(),
             'revenue' => $salesByDate->pluck('total')->toArray(),
@@ -249,7 +249,35 @@ class DashboardController extends Controller
 
         return view('dashboard.stock', compact('company', 'stocks'));
     }
+    public function inventory(Request $request)
+    {
+        $user = auth()->user();
+        $company = Company::findOrFail($user->company_id);
 
+        $query = Stock::where('company_id', $company->id)
+            ->with('product');
+
+        // Filters
+        if ($request->boolean('low_stock')) {
+            $query->whereColumn('available_quantity', '<=', 'reorder_level')
+                  ->whereNotNull('reorder_level');
+        }
+
+        if ($request->boolean('out_of_stock')) {
+            $query->where('available_quantity', '<=', 0);
+        }
+
+        if ($request->filled('search')) {
+            $query->whereHas('product', function($q) use ($request) {
+                $q->where('name', 'like', "%{$request->search}%")
+                  ->orWhere('code', 'like', "%{$request->search}%");
+            });
+        }
+
+        $stocks = $query->paginate(20);
+
+        return view('dashboard.stock', compact('company', 'stocks'));
+    }
     /**
      * Purchases listing page
      */

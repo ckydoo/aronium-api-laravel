@@ -13,19 +13,20 @@ Route::get('/', function () {
 Route::middleware('auth')->group(function () {
      // Main dashboard
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
-    
+
     // Sales
     Route::get('/dashboard/sales', [DashboardController::class, 'sales'])->name('dashboard.sales');
-    
+
     // Products
     Route::get('/dashboard/products', [DashboardController::class, 'products'])->name('dashboard.products');
-    
+
     // Inventory/Stock
     Route::get('/dashboard/inventory', [DashboardController::class, 'inventory'])->name('dashboard.inventory');
-    
+    Route::get('/dashboard/stock', [DashboardController::class, 'stock'])->name('dashboard.stock');
+
     // Purchases
     Route::get('/dashboard/purchases', [DashboardController::class, 'purchases'])->name('dashboard.purchases');
-    
+
     // Z-Reports
     Route::get('/dashboard/z-reports', [DashboardController::class, 'zReports'])->name('dashboard.z-reports');
 

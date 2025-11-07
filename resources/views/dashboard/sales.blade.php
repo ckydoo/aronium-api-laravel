@@ -4,17 +4,7 @@
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">
                 {{ __('Sales') }}
             </h2>
-            
-            <form method="GET" action="{{ route('dashboard.sales') }}" class="flex items-center gap-4">
-                <select name="company_id" onchange="this.form.submit()" 
-                        class="rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                    @foreach($companies as $company)
-                        <option value="{{ $company->id }}" {{ $selectedCompanyId == $company->id ? 'selected' : '' }}>
-                            {{ $company->name }}
-                        </option>
-                    @endforeach
-                </select>
-            </form>
+
         </div>
     </x-slot>
 
@@ -69,7 +59,7 @@
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                                {{ $sale->status == 'fiscalized' ? 'bg-green-100 text-green-800' : 
+                                                {{ $sale->status == 'fiscalized' ? 'bg-green-100 text-green-800' :
                                                    ($sale->status == 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800') }}">
                                                 {{ ucfirst($sale->status) }}
                                             </span>
@@ -97,7 +87,7 @@
                             </tbody>
                         </table>
                     </div>
-                    
+
                     <div class="mt-4">
                         {{ $sales->links() }}
                     </div>

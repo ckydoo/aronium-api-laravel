@@ -4,17 +4,6 @@
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">
                 {{ __('Products') }}
             </h2>
-            
-            <form method="GET" action="{{ route('dashboard.products') }}" class="flex items-center gap-4">
-                <select name="company_id" onchange="this.form.submit()" 
-                        class="rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                    @foreach($companies as $company)
-                        <option value="{{ $company->id }}" {{ $selectedCompanyId == $company->id ? 'selected' : '' }}>
-                            {{ $company->name }}
-                        </option>
-                    @endforeach
-                </select>
-            </form>
         </div>
     </x-slot>
 
@@ -106,7 +95,7 @@
                             </tbody>
                         </table>
                     </div>
-                    
+
                     <div class="mt-4">
                         {{ $products->links() }}
                     </div>
